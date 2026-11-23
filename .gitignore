@@ -1,0 +1,15 @@
+# Keep lab artefacts, captures, and credentials out of the repo
+evidence/
+loot/
+*.ccache
+*.kirbi
+*.nessus
+*.pcap
+*.dmp
+creds*.txt
+*.local
+
+# Scratch
+tmp/
+scratch/
+.DS_Store
